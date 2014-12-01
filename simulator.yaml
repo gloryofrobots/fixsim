@@ -1,0 +1,17 @@
+---
+symbols:
+    - name: USD/RUB
+      bid:
+        - size: 20000
+          price: 48.223
+
+        - size: 10000
+          price: 50.111
+      ask:
+        - size: 20000
+          price: 49.345
+
+        - size: 10000
+          price: 51.656
+...
+

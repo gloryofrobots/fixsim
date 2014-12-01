@@ -26,6 +26,7 @@
   <field name='XmlData' required='N' />
   <field name='MessageEncoding' required='N' />
   <field name='LastMsgSeqNumProcessed' required='N' />
+
   <component name='Hop' required='N' />
  </header>
  <messages>
@@ -486,43 +487,29 @@
 
    <field name='Side' required='Y' />
   </message>
-
-
-
-
-
-
-
-
-
-
   <message name='MarketDataRequest' msgcat='app' msgtype='V'>
    <field name='MDReqID' required='Y' />
    <field name='SubscriptionRequestType' required='Y' />
    <field name='MarketDepth' required='Y' />
    <field name='MDUpdateType' required='Y' />
 
-
-
-
    <component name='MDReqGrp' required='Y' />
    <component name='InstrmtMDReqGrp' required='Y' />
-
 
 
   </message>
   <message name='MarketDataSnapshotFullRefresh' msgcat='app' msgtype='W'>
    <field name='MDReqID' required='Y' />
-   <field name='cTickSize' required='Y' />
-   <component name='Instrument' required='Y' />
+<!--    <field name='cTickSize' required='Y' /> -->
+  <component name='Instrument' required='Y' />
+  <field name='MDInternalReference' required='Y' />
 
-
-   <field name='FinancialStatus' required='N' />
-   <field name='CorporateAction' required='N' />
-   <field name='NetChgPrevDay' required='N' />
+<!--    <field name='FinancialStatus' required='N' /> -->
+<!--    <field name='CorporateAction' required='N' /> -->
+<!--    <field name='NetChgPrevDay' required='N' /> -->
    <component name='MDFullGrp' required='Y' />
-   <field name='ApplQueueDepth' required='N' />
-   <field name='ApplQueueResolution' required='N' />
+<!--    <field name='ApplQueueDepth' required='N' /> -->
+<!--    <field name='ApplQueueResolution' required='N' /> -->
   </message>
   <message name='MarketDataIncrementalRefresh' msgcat='app' msgtype='X'>
    <field name='MDReqID' required='N' />
@@ -533,72 +520,12 @@
   <message name='MarketDataRequestReject' msgcat='app' msgtype='Y'>
    <field name='MDReqID' required='Y' />
    <field name='MDReqRejReason' required='Y' />
+   <field name='InstrRegistry' required='N' />
    <component name='MDRjctGrp' required='N' />
    <field name='Text' required='N' />
    <field name='EncodedTextLen' required='N' />
    <field name='EncodedText' required='N' />
   </message>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
  </messages>
  <trailer>
   <field name='SignatureLength' required='N' />
@@ -606,15 +533,6 @@
   <field name='CheckSum' required='Y' />
  </trailer>
  <components>
-
-
-
-
-
-
-
-
-
   <component name='Instrument'>
    <field name='Symbol' required='Y' />
    <field name='SymbolSfx' required='N' />
@@ -668,7 +586,7 @@
     <field name='MDEntryPx' required='Y' />
     <field name='Currency' required='Y' />
     <field name='MDEntrySize' required='Y' />
-    <field name='MDEntryDate' required='Y' />
+    <field name='MDEntryDate' required='N' />
     <field name='MDEntryTime' required='N' />
     <field name='TickDirection' required='N' />
     <field name='MDMkt' required='N' />
@@ -737,8 +655,8 @@
 
     <field name='cFutSettDate' required='N' />
     <field name='cFutSettDate2' required='N' />
-    <field name='cCurrency' required='Y' />
-    <field name='cOrderQty' required='Y' />
+    <field name='cCurrency' required='N' />
+    <field name='cOrderQty' required='N' />
     <field name='cOrderQty2' required='N' />
     <field name='cTenorValue' required='N' />
     <field name='cTenorValue2' required='N' />
@@ -3878,5 +3796,6 @@
   <field number='6233' name='cOrdStatusReqID' type='STRING' />
   <filed number='6054' name='cQuotedQty' type='QTY' />
   <filed number='6055' name='cQuotedQty2' type='QTY' />
+  <field number='20040'     name='MDInternalReference' type='STRING' />
  </fields>
 </fix>
