@@ -1,17 +1,27 @@
 ---
+publish_interval: 1
+
+fix_version: FIX44
+
 symbols:
     - name: USD/RUB
       bid:
         - size: 20000
           price: 48.223
 
+
         - size: 10000
           price: 50.111
+
       ask:
         - size: 20000
           price: 49.345
 
         - size: 10000
           price: 51.656
+
+      variation:
+            step: 0.01
+            limit: 2
 ...
 

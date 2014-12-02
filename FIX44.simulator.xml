@@ -303,7 +303,7 @@
    <field name='TransactTime' required='Y' />
 
    <field name='QtyType' required='N' />
-
+   <field name='OrderQty' required='Y' />
    <field name='OrdType' required='Y' />
    <field name='PriceType' required='N' />
    <field name='Price' required='N' />
@@ -502,7 +502,7 @@
    <field name='MDReqID' required='Y' />
 <!--    <field name='cTickSize' required='Y' /> -->
   <component name='Instrument' required='Y' />
-  <field name='MDInternalReference' required='Y' />
+  <field name='MDInternalReference' required='N' />
 
 <!--    <field name='FinancialStatus' required='N' /> -->
 <!--    <field name='CorporateAction' required='N' /> -->
@@ -585,14 +585,17 @@
     <field name='MDEntryType' required='Y' />
     <field name='MDEntryPx' required='Y' />
     <field name='Currency' required='Y' />
+
     <field name='MDEntrySize' required='Y' />
-    <field name='MDEntryDate' required='N' />
+    <field name='QuoteCondition' required='Y' />
+
+       <field name='MDEntryDate' required='N' />
     <field name='MDEntryTime' required='N' />
     <field name='TickDirection' required='N' />
     <field name='MDMkt' required='N' />
     <field name='TradingSessionID' required='N' />
     <field name='TradingSessionSubID' required='N' />
-    <field name='QuoteCondition' required='Y' />
+
     <field name='TradeCondition' required='N' />
     <field name='MDEntryOriginator' required='N' />
     <field name='LocationID' required='N' />
@@ -1447,6 +1450,7 @@
   <field number='149' name='URLLink' type='STRING' />
   <field number='150' name='ExecType' type='CHAR'>
    <value enum='0' description='NEW' />
+   <value enum='2' description='FILL' />
    <value enum='3' description='DONE_FOR_DAY' />
    <value enum='4' description='CANCELED' />
    <value enum='5' description='REPLACE' />
