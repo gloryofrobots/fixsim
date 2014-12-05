@@ -6,7 +6,7 @@ import datetime
 import yaml
 from twisted.internet import task
 
-def rangef(first, last, step):
+def float_range(first, last, step):
     if last < 0:
         raise ValueError("last float is negative")
 
@@ -17,7 +17,6 @@ def rangef(first, last, step):
 
         result.append(first)
         first+=step
-
 
 class MarketDataError(quickfix.Exception):
     pass
@@ -81,10 +80,14 @@ class Subscriptions(object):
         self.subscriptions[subscription.symbol] = subscription
 
     def get(self, symbol):
-        return self.subscriptions.get(symbol, None)
+        subscription = self.subscriptions.get(symbol, None)
+        return subscription
 
     def __iter__(self):
         return self.subscriptions.values().__iter__()
+
+    def __repr__(self):
+        return self.subscriptions.__repr__()
 
 class OrderBook(object):
     def __init__(self, quotes):
@@ -132,7 +135,10 @@ class OrderBook(object):
 class SnapshotGenerator(object):
     def __init__(self, step, limit):
         self.sources = []
-        self.deltas = rangef(0, limit, step)
+        self.deltas = float_range(0, limit, step)
+        if len(self.deltas) == 0:
+            self.deltas = [0]
+
         self.orderBook = None
 
     def addQuote(self, quote):
@@ -175,8 +181,41 @@ def load_yaml(path):
     return cfg
 
 
-
 def create_acceptor(server_config, simulation_config):
+    import logging
+    import logging.handlers
+
+    def create_logger(config):
+        def syslog_logger():
+            logger = logging.getLogger('FixServer')
+            logger.setLevel(logging.DEBUG)
+            handler = logging.handlers.SysLogHandler()
+            logger.addHandler(handler)
+            return logger
+
+        def file_logger(fname):
+            logger = logging.getLogger('FixServer')
+            logger.setLevel(logging.DEBUG)
+            handler = logging.handlers.RotatingFileHandler(fname)
+            logger.addHandler(handler)
+            return logger
+
+        logcfg = config.get('logging', None)
+        if not logging:
+            return syslog_logger()
+
+        target = logcfg['target']
+        if target == 'syslog':
+            logger =syslog_logger()
+        elif target == 'file':
+            filename = logcfg['filename']
+            logger = file_logger(filename)
+        else:
+            raise FixSimError("invalid logger " + str(target))
+
+        logger.addHandler(logging.StreamHandler())
+        return logger
+
     def create_subscriptions(sources):
         subscriptions = Subscriptions()
 
@@ -196,7 +235,7 @@ def create_acceptor(server_config, simulation_config):
                 subscription.generator.addQuote(Quote(Quote.ASK, quote['price'], quote['size']))
 
             subscriptions.add(subscription)
-            return subscriptions
+        return subscriptions
 
     settings = quickfix.SessionSettings(server_config)
     config = load_yaml(simulation_config)
@@ -206,29 +245,45 @@ def create_acceptor(server_config, simulation_config):
     if fix_version != 'FIX44':
         raise FixSimError("Unsupported fix version %s" % str(fix_version))
 
-    import quickfix44
+
     publish_interval = config.get("publish_interval", 1)
     subscriptions = create_subscriptions(config['symbols'])
 
-    application = Server(quickfix44, publish_interval, subscriptions)
+    logger = create_logger(config)
+    rejectRate = config.get("reject_rate", 0)
+
+    application = ServerFIX44(logger, publish_interval, rejectRate,  subscriptions)
     storeFactory = quickfix.FileStoreFactory(settings)
     logFactory = quickfix.ScreenLogFactory(settings)
     acceptor = quickfix.SocketAcceptor(application, storeFactory, settings, logFactory)
     return acceptor
 
+
+def instance_safe_call(fn):
+    def wrapper(self, *args, **kwargs):
+        try:
+            return fn(self, *args, **kwargs)
+        except quickfix.Exception as e:
+            raise e
+        except Exception as e:
+            self.logger.exception(str(e))
+    return wrapper
+
+
 class Server(quickfix.Application):
-    def __init__(self, fix_version, interval, subscriptions):
+    def __init__(self, fixVersion, logger, interval, rejectRate, subscriptions):
         super(Server, self).__init__()
+        self.rejectRate = rejectRate
         self.idGen = IDGenerator()
         self.subscriptions = subscriptions
-        self.fixVersion = fix_version
+        self.fixVersion = fixVersion
+        self.logger = logger
         self.publishInterval = interval
+        self._onInit()
+
+    def _onInit(self):
         self.loop = task.LoopingCall(self.publishMarketData)
         self.loop.start(self.publishInterval, True)
-
-
-
-
 
     def onCreate(self, sessionID):
         pass
@@ -248,18 +303,17 @@ class Server(quickfix.Application):
     def toApp(self, sessionID, message):
         return
 
+    @instance_safe_call
     def sendToTarget(self, message, sessionID):
-        try:
-            print "SEND TO SESSION", sessionID
-            quickfix.Session.sendToTarget(message, sessionID)
-        except quickfix.SessionNotFound as e:
-            print str(e)
+        self.logger.info("SEND TO SESSION %s", message)
+        quickfix.Session.sendToTarget(message, sessionID)
 
-
+    @instance_safe_call
     def publishMarketData(self):
-        print "publishMarketData", self.subscriptions
-        for subscription in self.subscriptions.values():
+        self.logger.info("publishMarketData %s", self.subscriptions)
+        for subscription in self.subscriptions:
             if not subscription.hasSessions():
+                self.logger.info("No session subscribed, skip publish symbol %s", subscription.symbol)
                 continue
 
             message = self.fixVersion.MarketDataSnapshotFullRefresh()
@@ -269,8 +323,9 @@ class Server(quickfix.Application):
             group = self.fixVersion.MarketDataSnapshotFullRefresh().NoMDEntries()
 
             subscription.createOrderBook()
-
             for quote in subscription.orderbook:
+                self.logger.info('add quote to fix message %s', str(quote))
+
                 group.setField(quickfix.MDEntryType(quote.side))
                 group.setField(quickfix.MDEntryPx(quote.price))
                 group.setField(quickfix.MDEntrySize(quote.size))
@@ -279,67 +334,83 @@ class Server(quickfix.Application):
                 group.setField(quickfix.QuoteCondition(quickfix.QuoteCondition_OPEN_ACTIVE))
                 message.addGroup( group )
 
+
             for sessionID in subscription:
                 self.sendToTarget(message, sessionID)
 
-
     def onMarketDataRequest(self, message, sessionID):
-        print 'onMarketDataRequest', message, sessionID
         requestID = quickfix.MDReqID()
-        message.getField(requestID)
-        print "Request id ", requestID.getValue()
+        try:
+            message.getField(requestID)
+        except Exception as e:
+            raise quickfix.IncorrectTagValue(requestID)
 
-        relatedSym = self.fixVersion.MarketDataRequest.NoRelatedSym()
-        symbolFix = quickfix.Symbol()
-        product = quickfix.Product()
+        try:
+            relatedSym = self.fixVersion.MarketDataRequest.NoRelatedSym()
+            symbolFix = quickfix.Symbol()
+            product = quickfix.Product()
 
-        message.getGroup(1, relatedSym)
-        relatedSym.getField(symbolFix)
-        relatedSym.getField(product)
-        print "onMarketDataRequest symbol", symbolFix, product
-        if product.getValue() != quickfix.Product_CURRENCY:
-            self.sendMarketDataReject(requestID, " product.getValue() != quickfix.Product_CURRENCY:", sessionID)
-            return
+            message.getGroup(1, relatedSym)
+            relatedSym.getField(symbolFix)
+            relatedSym.getField(product)
+            if product.getValue() != quickfix.Product_CURRENCY:
+                self.sendMarketDataReject(requestID, " product.getValue() != quickfix.Product_CURRENCY:", sessionID)
+                return
 
-        #bid
-        entryType = self.fixVersion.MarketDataRequest.NoMDEntryTypes()
-        message.getGroup(1, entryType)
-        #print "onMarketDataRequest bid", entryType
+            #bid
+            entryType = self.fixVersion.MarketDataRequest.NoMDEntryTypes()
+            message.getGroup(1, entryType)
 
-        #ask
-        message.getGroup(2, entryType)
-        #print "onMarketDataRequest ask", entryType
+            #ask
+            message.getGroup(2, entryType)
 
-        symbol = symbolFix.getValue()
+            symbol = symbolFix.getValue()
+            subscription = self.subscriptions.get(symbol)
+            if subscription is None:
+                self.sendMarketDataReject(requestID, "Unknown symbol: %s" % str(symbol), sessionID)
+                return
 
-        if not self.isSymbolSupported(symbol):
-            self.sendMarketDataReject(requestID, "Symbol %s does not supported" % symbol , sessionID)
+            subscription.addSession(sessionID)
+        except Exception as e:
+            self.sendMarketDataReject(requestID, str(e), sessionID)
 
-        self.addSessionToSubscription(symbol, sessionID)
-
-    def isSymbolSupported(self, symbol):
-        return symbol in self.subscriptions
-
-    def getSubscription(self, symbol):
-        return self.subscriptions[symbol]
-
-    def addSessionToSubscription(self, symbol, sessionID):
-        if not self.isSymbolSupported(symbol):
-            raise MarketDataError("Symbol %s does not supported" % symbol )
-
-        subscription = self.getSubscription(symbol)
-        subscription.addSession(sessionID)
-
+    @instance_safe_call
     def sendMarketDataReject(self, requestID, reason, sessionID):
+         self.logger.error("SEND REJECT %s", reason)
          reject = self.fixVersion.MarketDataRequestReject()
          reject.setField(requestID)
          text = quickfix.Text(reason)
+         reject.setField(quickfix.MDReqRejReason("0"))
          reject.setField(text)
          self.sendToTarget(reject, sessionID)
 
     def getSettlementDate(self):
         tomorrow = datetime.date.today() + datetime.timedelta(days=1)
         return tomorrow.strftime('%Y%m%d')
+
+    def onNewOrderSingle(self, message, beginString, sessionID):
+        pass
+
+    @instance_safe_call
+    def fromApp(self, message, sessionID):
+        fixMsgType = quickfix.MsgType()
+        beginString = quickfix.BeginString()
+        message.getHeader().getField(beginString)
+        message.getHeader().getField(fixMsgType)
+        msgType = fixMsgType.getValue()
+
+        self.logger.info("Message type %s", str(msgType))
+
+        if msgType == 'D':
+            self.onNewOrderSingle(message, beginString, sessionID)
+        elif msgType == 'V':
+            self.onMarketDataRequest(message, sessionID)
+
+
+class ServerFIX44(Server):
+    def __init__(self, logger, interval, reject_rate, subscriptions):
+        import quickfix44
+        super(ServerFIX44, self).__init__(quickfix44, logger, interval, reject_rate, subscriptions)
 
     def onNewOrderSingle(self, message, beginString, sessionID):
         symbol = quickfix.Symbol()
@@ -349,6 +420,7 @@ class Server(quickfix.Application):
         price = quickfix.Price()
         clOrdID = quickfix.ClOrdID()
         quoteID = quickfix.QuoteID()
+        currency = quickfix.Currency()
 
         message.getField(ordType)
         if ordType.getValue() != quickfix.OrdType_PREVIOUSLY_QUOTED:
@@ -360,67 +432,69 @@ class Server(quickfix.Application):
         message.getField(price)
         message.getField(clOrdID)
         message.getField(quoteID)
-
-        subscription = self.getSubscription(symbol.getValue())
-        quote = subscription.orderbook.get(quoteID.getValue())
-
-        execPrice = price.getValue()
-        execSize = orderQty.getValue()
-        if execSize > quote.size:
-            raise quickfix.IncorrectMessageStructure("size to large for quote")
-
-        if abs(execPrice - quote.price) > 0.0000001:
-            raise quickfix.IncorrectMessageStructure("Trade price not equal to quote")
+        message.getField(currency)
 
         executionReport = quickfix.Message()
         executionReport.getHeader().setField(beginString)
         executionReport.getHeader().setField(quickfix.MsgType(quickfix.MsgType_ExecutionReport))
-
-        executionReport.setField(quickfix.SettlDate(self.getSettlementDate()))
-        executionReport.setField(quickfix.Currency(subscription.currency))
         executionReport.setField(quickfix.OrderID(self.idGen.orderID()))
         executionReport.setField(quickfix.ExecID(self.idGen.execID()))
-        executionReport.setField(quickfix.OrdStatus(quickfix.OrdStatus_FILLED))
-        executionReport.setField(symbol)
-        executionReport.setField(side)
-        executionReport.setField(clOrdID)
 
-        executionReport.setField(quickfix.Price(price.getValue()))
-        executionReport.setField(quickfix.AvgPx(execPrice))
-        executionReport.setField(quickfix.LastPx(execPrice))
+        try:
+            reject_chance = random.choice(range(1,101))
+            if self.rejectRate > reject_chance:
+                raise FixSimError("Rejected by cruel destiny %s" % str((reject_chance, self.rejectRate)))
 
-        executionReport.setField(quickfix.LastShares(execSize))
-        executionReport.setField(quickfix.CumQty(execSize))
-        executionReport.setField(quickfix.OrderQty(execSize))
+            subscription = self.subscriptions.get(symbol.getValue())
+            quote = subscription.orderbook.get(quoteID.getValue())
+
+            execPrice = price.getValue()
+            execSize = orderQty.getValue()
+            if execSize > quote.size:
+                raise FixSimError("size to large for quote")
+
+            if abs(execPrice - quote.price) > 0.0000001:
+                raise FixSimError("Trade price not equal to quote")
 
 
-        #TODO VERSION ADAPTERS
-        if beginString.getValue() == quickfix.BeginString_FIX40 \
-                or beginString.getValue() == quickfix.BeginString_FIX41 \
-                or beginString.getValue() == quickfix.BeginString_FIX42:
-            executionReport.setField(quickfix.ExecTransType(quickfix.ExecTransType_NEW))
+            executionReport.setField(quickfix.SettlDate(self.getSettlementDate()))
+            executionReport.setField(quickfix.Currency(subscription.currency))
 
-        if beginString.getValue() >= quickfix.BeginString_FIX41:
+            executionReport.setField(quickfix.OrdStatus(quickfix.OrdStatus_FILLED))
+            executionReport.setField(symbol)
+            executionReport.setField(side)
+            executionReport.setField(clOrdID)
+
+            executionReport.setField(quickfix.Price(price.getValue()))
+            executionReport.setField(quickfix.AvgPx(execPrice))
+            executionReport.setField(quickfix.LastPx(execPrice))
+
+            executionReport.setField(quickfix.LastShares(execSize))
+            executionReport.setField(quickfix.CumQty(execSize))
+            executionReport.setField(quickfix.OrderQty(execSize))
+
             executionReport.setField(quickfix.ExecType(quickfix.ExecType_FILL))
             executionReport.setField(quickfix.LeavesQty(0))
 
+        except Exception as e:
+            self.logger.exception("Close order error")
+            executionReport.setField(quickfix.SettlDate(''))
+            executionReport.setField(currency)
+
+            executionReport.setField(quickfix.OrdStatus(quickfix.OrdStatus_REJECTED))
+            executionReport.setField(symbol)
+            executionReport.setField(side)
+            executionReport.setField(clOrdID)
+
+            executionReport.setField(quickfix.Price(0))
+            executionReport.setField(quickfix.AvgPx(0))
+            executionReport.setField(quickfix.LastPx(0))
+
+            executionReport.setField(quickfix.LastShares(0))
+            executionReport.setField(quickfix.CumQty(0))
+            executionReport.setField(quickfix.OrderQty(0))
+
+            executionReport.setField(quickfix.ExecType(quickfix.ExecType_REJECTED))
+            executionReport.setField(quickfix.LeavesQty(0))
 
         self.sendToTarget(executionReport, sessionID)
-
-
-    def fromApp(self, message, sessionID):
-        print "********FROM APP", message, sessionID
-        fixMsgType = quickfix.MsgType()
-        beginString = quickfix.BeginString()
-        message.getHeader().getField(beginString)
-        message.getHeader().getField(fixMsgType)
-
-        print fixMsgType
-
-        msgType = fixMsgType.getValue()
-        print "************************MESSAGE TYPE:", msgType
-        if msgType == 'D':
-            self.onNewOrderSingle(message, beginString, sessionID)
-        elif msgType == 'V':
-            self.onMarketDataRequest(message, sessionID)
-

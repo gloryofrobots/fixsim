@@ -3,7 +3,7 @@ import yaml
 import quickfix
 
 from twisted.internet import reactor
-from server import create_server()
+from server import create_acceptor
 
 def load_simulator_config(path):
     with open(path,'r') as stream:
@@ -13,7 +13,7 @@ def load_simulator_config(path):
 
 def main():
     try:
-
+        acceptor = create_acceptor(sys.argv[1], sys.argv[2])
         acceptor.start()
 
         reactor.run()

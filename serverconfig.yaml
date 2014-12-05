@@ -1,7 +1,13 @@
 ---
-publish_interval: 1
+publish_interval: 10
 
 fix_version: FIX44
+logging:
+    target: file
+    filename: fixsim.log
+
+#percent for rejected trades
+reject_rate: 50
 
 symbols:
     - name: USD/RUB
@@ -21,7 +27,7 @@ symbols:
           price: 51.656
 
       variation:
-            step: 0.01
-            limit: 2
+        step: 0.1
+        limit: 20
 ...
 
