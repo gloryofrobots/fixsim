@@ -9,8 +9,8 @@ logging:
 #percent for rejected trades
 reject_rate: 50
 
-symbols:
-    - name: USD/RUB
+instruments:
+    - symbol: USD/RUB
       bid:
         - size: 20000
           price: 48.223

@@ -1,0 +1,15 @@
+---
+subscribe_interval: 10
+
+fix_version: FIX44
+logging:
+    target: file
+    filename: fixsim-client.log
+
+#percent for orders to make
+skip_snapshot_chance: 0
+
+instruments:
+    - symbol: USD/RUB
+#- symbol: EUR/RUB
+...

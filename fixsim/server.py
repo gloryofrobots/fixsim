@@ -3,26 +3,12 @@ import copy
 import uuid
 import random
 import datetime
-import yaml
 from twisted.internet import task
 
-def float_range(first, last, step):
-    if last < 0:
-        raise ValueError("last float is negative")
+from sim import (FixSimError, float_range,
+                 FixSimApplication, create_fix_version,
+                 instance_safe_call, create_logger, IncrementID, load_yaml)
 
-    result = []
-    while True:
-        if first >= last:
-            return result
-
-        result.append(first)
-        first+=step
-
-class MarketDataError(quickfix.Exception):
-    pass
-
-class FixSimError(Exception):
-    pass
 
 class Quote(object):
     BID = '0'
@@ -37,6 +23,7 @@ class Quote(object):
 
     def __repr__(self):
         return "(%s %s, %s)" % (self.side, str(self.price), str(self.size))
+
 
 class Subscription(object):
     def __init__(self, symbol, generator):
@@ -70,6 +57,7 @@ class Subscription(object):
     def __len__(self):
         return self.sessions.__len__()
 
+
 class Subscriptions(object):
     def __init__(self):
         self.subscriptions = {}
@@ -89,6 +77,7 @@ class Subscriptions(object):
     def __repr__(self):
         return self.subscriptions.__repr__()
 
+
 class OrderBook(object):
     def __init__(self, quotes):
         self.quotes = []
@@ -104,21 +93,21 @@ class OrderBook(object):
         if len(ask) != len(bid):
             raise FixSimError("len(ask) != len(bid)")
 
-        bid,ask = self._sort(bid, ask)
+        bid, ask = self._sort(bid, ask)
         self._normalise(bid, ask)
         # print "BID", bid
         # print "ASK", ask
-        result = bid+ask
+        result = bid + ask
         # print "result", result
         self.quotes = result
 
     def _sort(self, bid, ask):
         bid_new = sorted(bid, key=lambda x: x.price, reverse=True)
         ask_new = sorted(ask, key=lambda x: x.price)
-        return bid_new,ask_new
+        return bid_new, ask_new
 
     def _normalise(self, bid, ask):
-        for b,a in zip(bid, ask):
+        for b, a in zip(bid, ask):
             if b.price > a.price:
                 b.price = a.price
 
@@ -131,6 +120,7 @@ class OrderBook(object):
                 return quote
 
         return None
+
 
 class SnapshotGenerator(object):
     def __init__(self, step, limit):
@@ -155,78 +145,34 @@ class SnapshotGenerator(object):
             self.modify(quote)
             yield quote
 
+
 class IDGenerator(object):
     def __init__(self):
-        self._orderID = 0
-        self._execID = 0
-        self._reqID = 0
+        self._orderID = IncrementID()
+        self._execID = IncrementID()
+        self._reqID = IncrementID()
 
     def orderID(self):
-        self._orderID += 1
-        return str(self._orderID)
+        return self._orderID.generate()
 
     def execID(self):
-        self._execID += 1
-        return str(self._execID)
+        return self._execID.generate()
 
     def reqID(self):
-        self._reqID += 1
-        return str(self._reqID)
-
-
-def load_yaml(path):
-    with open(path,'r') as stream:
-        cfg = yaml.load(stream)
-
-    return cfg
-
+        return self._reqID.generate()
 
 def create_acceptor(server_config, simulation_config):
-    import logging
-    import logging.handlers
-
-    def create_logger(config):
-        def syslog_logger():
-            logger = logging.getLogger('FixServer')
-            logger.setLevel(logging.DEBUG)
-            handler = logging.handlers.SysLogHandler()
-            logger.addHandler(handler)
-            return logger
-
-        def file_logger(fname):
-            logger = logging.getLogger('FixServer')
-            logger.setLevel(logging.DEBUG)
-            handler = logging.handlers.RotatingFileHandler(fname)
-            logger.addHandler(handler)
-            return logger
-
-        logcfg = config.get('logging', None)
-        if not logging:
-            return syslog_logger()
-
-        target = logcfg['target']
-        if target == 'syslog':
-            logger =syslog_logger()
-        elif target == 'file':
-            filename = logcfg['filename']
-            logger = file_logger(filename)
-        else:
-            raise FixSimError("invalid logger " + str(target))
-
-        logger.addHandler(logging.StreamHandler())
-        return logger
-
     def create_subscriptions(sources):
         subscriptions = Subscriptions()
 
         for source in sources:
             variation = source.get('variation', None)
             if variation:
-                step,limit = variation.get('step', 0), variation.get('limit', 0)
+                step, limit = variation.get('step', 0), variation.get('limit', 0)
             else:
-                step,limit = 0,0
+                step, limit = 0, 0
 
-            subscription = Subscription(source['name'], SnapshotGenerator(step, limit))
+            subscription = Subscription(source['symbol'], SnapshotGenerator(step, limit))
 
             for quote in source['bid']:
                 subscription.generator.addQuote(Quote(Quote.BID, quote['price'], quote['size']))
@@ -238,46 +184,30 @@ def create_acceptor(server_config, simulation_config):
         return subscriptions
 
     settings = quickfix.SessionSettings(server_config)
+
     config = load_yaml(simulation_config)
 
-    #ONLY FIX44 FOR NOW
-    fix_version = config.get('fix_version','FIX44')
-    if fix_version != 'FIX44':
-        raise FixSimError("Unsupported fix version %s" % str(fix_version))
-
+    fix_version = create_fix_version(config)
 
     publish_interval = config.get("publish_interval", 1)
-    subscriptions = create_subscriptions(config['symbols'])
+    subscriptions = create_subscriptions(config['instruments'])
 
     logger = create_logger(config)
     rejectRate = config.get("reject_rate", 0)
 
-    application = ServerFIX44(logger, publish_interval, rejectRate,  subscriptions)
+    application = Server(fix_version, logger, publish_interval, rejectRate, subscriptions)
     storeFactory = quickfix.FileStoreFactory(settings)
     logFactory = quickfix.ScreenLogFactory(settings)
     acceptor = quickfix.SocketAcceptor(application, storeFactory, settings, logFactory)
     return acceptor
 
 
-def instance_safe_call(fn):
-    def wrapper(self, *args, **kwargs):
-        try:
-            return fn(self, *args, **kwargs)
-        except quickfix.Exception as e:
-            raise e
-        except Exception as e:
-            self.logger.exception(str(e))
-    return wrapper
-
-
-class Server(quickfix.Application):
+class Server(FixSimApplication):
     def __init__(self, fixVersion, logger, interval, rejectRate, subscriptions):
-        super(Server, self).__init__()
+        super(Server, self).__init__(fixVersion, logger)
         self.rejectRate = rejectRate
         self.idGen = IDGenerator()
         self.subscriptions = subscriptions
-        self.fixVersion = fixVersion
-        self.logger = logger
         self.publishInterval = interval
         self._onInit()
 
@@ -305,15 +235,15 @@ class Server(quickfix.Application):
 
     @instance_safe_call
     def sendToTarget(self, message, sessionID):
-        self.logger.info("SEND TO SESSION %s", message)
+        self.logger.info("FixServer:SEND TO SESSION %s", message)
         quickfix.Session.sendToTarget(message, sessionID)
 
     @instance_safe_call
     def publishMarketData(self):
-        self.logger.info("publishMarketData %s", self.subscriptions)
+        self.logger.info("FixServer: publishMarketData %s", self.subscriptions)
         for subscription in self.subscriptions:
             if not subscription.hasSessions():
-                self.logger.info("No session subscribed, skip publish symbol %s", subscription.symbol)
+                self.logger.info("FixServer:No session subscribed, skip publish symbol %s", subscription.symbol)
                 continue
 
             message = self.fixVersion.MarketDataSnapshotFullRefresh()
@@ -324,7 +254,7 @@ class Server(quickfix.Application):
 
             subscription.createOrderBook()
             for quote in subscription.orderbook:
-                self.logger.info('add quote to fix message %s', str(quote))
+                self.logger.info('FixServer:add quote to fix message %s', str(quote))
 
                 group.setField(quickfix.MDEntryType(quote.side))
                 group.setField(quickfix.MDEntryPx(quote.price))
@@ -332,8 +262,7 @@ class Server(quickfix.Application):
                 group.setField(quickfix.QuoteEntryID(quote.id))
                 group.setField(quickfix.Currency(subscription.currency))
                 group.setField(quickfix.QuoteCondition(quickfix.QuoteCondition_OPEN_ACTIVE))
-                message.addGroup( group )
-
+                message.addGroup(group)
 
             for sessionID in subscription:
                 self.sendToTarget(message, sessionID)
@@ -349,7 +278,6 @@ class Server(quickfix.Application):
             relatedSym = self.fixVersion.MarketDataRequest.NoRelatedSym()
             symbolFix = quickfix.Symbol()
             product = quickfix.Product()
-
             message.getGroup(1, relatedSym)
             relatedSym.getField(symbolFix)
             relatedSym.getField(product)
@@ -357,11 +285,11 @@ class Server(quickfix.Application):
                 self.sendMarketDataReject(requestID, " product.getValue() != quickfix.Product_CURRENCY:", sessionID)
                 return
 
-            #bid
+            # bid
             entryType = self.fixVersion.MarketDataRequest.NoMDEntryTypes()
             message.getGroup(1, entryType)
 
-            #ask
+            # ask
             message.getGroup(2, entryType)
 
             symbol = symbolFix.getValue()
@@ -372,45 +300,22 @@ class Server(quickfix.Application):
 
             subscription.addSession(sessionID)
         except Exception as e:
+            print e,e.args
             self.sendMarketDataReject(requestID, str(e), sessionID)
 
     @instance_safe_call
     def sendMarketDataReject(self, requestID, reason, sessionID):
-         self.logger.error("SEND REJECT %s", reason)
-         reject = self.fixVersion.MarketDataRequestReject()
-         reject.setField(requestID)
-         text = quickfix.Text(reason)
-         reject.setField(quickfix.MDReqRejReason("0"))
-         reject.setField(text)
-         self.sendToTarget(reject, sessionID)
+        self.logger.error("FixServer:SEND REJECT %s", reason)
+        reject = self.fixVersion.MarketDataRequestReject()
+        reject.setField(requestID)
+        text = quickfix.Text(reason)
+        reject.setField(quickfix.MDReqRejReason("0"))
+        reject.setField(text)
+        self.sendToTarget(reject, sessionID)
 
     def getSettlementDate(self):
         tomorrow = datetime.date.today() + datetime.timedelta(days=1)
         return tomorrow.strftime('%Y%m%d')
-
-    def onNewOrderSingle(self, message, beginString, sessionID):
-        pass
-
-    @instance_safe_call
-    def fromApp(self, message, sessionID):
-        fixMsgType = quickfix.MsgType()
-        beginString = quickfix.BeginString()
-        message.getHeader().getField(beginString)
-        message.getHeader().getField(fixMsgType)
-        msgType = fixMsgType.getValue()
-
-        self.logger.info("Message type %s", str(msgType))
-
-        if msgType == 'D':
-            self.onNewOrderSingle(message, beginString, sessionID)
-        elif msgType == 'V':
-            self.onMarketDataRequest(message, sessionID)
-
-
-class ServerFIX44(Server):
-    def __init__(self, logger, interval, reject_rate, subscriptions):
-        import quickfix44
-        super(ServerFIX44, self).__init__(quickfix44, logger, interval, reject_rate, subscriptions)
 
     def onNewOrderSingle(self, message, beginString, sessionID):
         symbol = quickfix.Symbol()
@@ -441,7 +346,7 @@ class ServerFIX44(Server):
         executionReport.setField(quickfix.ExecID(self.idGen.execID()))
 
         try:
-            reject_chance = random.choice(range(1,101))
+            reject_chance = random.choice(range(1, 101))
             if self.rejectRate > reject_chance:
                 raise FixSimError("Rejected by cruel destiny %s" % str((reject_chance, self.rejectRate)))
 
@@ -455,7 +360,6 @@ class ServerFIX44(Server):
 
             if abs(execPrice - quote.price) > 0.0000001:
                 raise FixSimError("Trade price not equal to quote")
-
 
             executionReport.setField(quickfix.SettlDate(self.getSettlementDate()))
             executionReport.setField(quickfix.Currency(subscription.currency))
@@ -477,7 +381,7 @@ class ServerFIX44(Server):
             executionReport.setField(quickfix.LeavesQty(0))
 
         except Exception as e:
-            self.logger.exception("Close order error")
+            self.logger.exception("FixServer:Close order error")
             executionReport.setField(quickfix.SettlDate(''))
             executionReport.setField(currency)
 
@@ -498,3 +402,10 @@ class ServerFIX44(Server):
             executionReport.setField(quickfix.LeavesQty(0))
 
         self.sendToTarget(executionReport, sessionID)
+
+
+    def dispatchFromApp(self, msgType, message, beginString, sessionID):
+        if msgType == 'D':
+            self.onNewOrderSingle(message, beginString, sessionID)
+        elif msgType == 'V':
+            self.onMarketDataRequest(message, sessionID)
