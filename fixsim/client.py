@@ -86,7 +86,7 @@ def create_initiator(client_config, simulation_config):
 
     logger = create_logger(config)
     subscribe_interval = config.get('subscribe_interval', 1)
-    skip_snapshot_chance= config.get('skip_snapshot_chance', 0)
+    skip_snapshot_chance = config.get('skip_snapshot_chance', 0)
     application = Client(fix_version, logger, skip_snapshot_chance, subscribe_interval, subscriptions)
     storeFactory = quickfix.FileStoreFactory(settings)
     logFactory = quickfix.ScreenLogFactory(settings)
@@ -100,29 +100,43 @@ class Snapshot(object):
         self.bid = []
         self.ask = []
 
+    def getRandomQuote(self):
+        is_bid = random.randrange(0, 2)
+        if is_bid:
+            quotes = self.bid
+        else:
+            quotes = self.ask
+
+        quote = random.choice(quotes)
+        return quote
+
     def addBid(self, quote):
+        quote.side = Quote.SELL
         self.bid.append(quote)
 
     def addAsk(self, quote):
+        quote.side = quote.BUY
         self.ask.append(quote)
 
     def __repr__(self):
         return "Snapshot %s\n    BID: %s\n    ASK: %s" % (self.symbol, self.bid, self.ask)
 
+
 class Quote(object):
-    BID = '0'
-    ASK = '1'
+    SELL = '2'
+    BUY = '1'
 
     def __init__(self):
         super(Quote, self).__init__()
         self.side = None
         self.symbol = None
+        self.currency = None
         self.price = None
         self.size = None
         self.id = None
 
     def __repr__(self):
-        return "(%s %s, %s)" % (self.side, str(self.price), str(self.size))
+        return "(%s %s %s, %s)" % (str(self.id), self.side, str(self.price), str(self.size))
 
 
 class Client(FixSimApplication):
@@ -290,9 +304,6 @@ class Client(FixSimApplication):
 
         self.sendToTarget(executionReport, sessionID)
 
-    def makeOrder(self, quoteID):
-        pass
-
 
     def onMarketDataSnapshotFullRefresh(self, message, sessionID):
         skip_chance = random.choice(range(1, 101))
@@ -303,6 +314,7 @@ class Client(FixSimApplication):
         fix_symbol = quickfix.Symbol()
         message.getField(fix_symbol)
         symbol = fix_symbol.getValue()
+
         snapshot = Snapshot(symbol)
 
         group = self.fixVersion.MarketDataSnapshotFullRefresh.NoMDEntries()
@@ -314,15 +326,19 @@ class Client(FixSimApplication):
             message.getGroup(i, group)
             price = quickfix.MDEntryPx()
             size = quickfix.MDEntrySize()
+            currency = quickfix.Currency()
             quote_id = quickfix.QuoteEntryID()
+
             group.getField(quote_id)
+            group.getField(currency)
             group.getField(price)
             group.getField(size)
 
-            print price, size, quote_id
+            print price, size, quote_id, currency
             quote = Quote()
             quote.price = price.getValue()
             quote.size = size.getValue()
+            quote.currency = currency.getValue()
             quote.id = quote_id.getValue()
 
             fix_entry_type = quickfix.MDEntryType()
@@ -336,8 +352,33 @@ class Client(FixSimApplication):
             else:
                 raise RuntimeError("Unknown entry type %s" % str(entry_type))
 
+        self.makeOrder(snapshot)
+
+    def makeOrder(self, snapshot):
         print "SNAPSHOT RECEIVED !!!!!!"
         print snapshot
+        quote = snapshot.getRandomQuote()
+        print "CHOSEN QUOTE", quote
+        order = self.fixVersion.NewOrderSingle()
+        order.setField(quickfix.HandlInst(quickfix.HandlInst_AUTOMATED_EXECUTION_ORDER_PUBLIC_BROKER_INTERVENTION_OK))
+        order.setField(quickfix.SecurityType(quickfix.SecurityType_FOREIGN_EXCHANGE_CONTRACT))
+
+        order.setField(quickfix.OrdType(quickfix.OrdType_PREVIOUSLY_QUOTED))
+        order.setField(quickfix.ClOrdID(self.idGen.orderID()))
+        order.setField(quickfix.QuoteID(quote.id))
+
+        order.setField(quickfix.SecurityDesc("SPOT"))
+        order.setField(quickfix.Symbol(snapshot.symbol))
+        order.setField(quickfix.Currency(quote.currency))
+        order.setField(quickfix.Side(quote.side))
+
+        order.setField(quickfix.OrderQty(quote.size))
+        order.setField(quickfix.FutSettDate("SP"))
+        order.setField(quickfix.Price(quote.price))
+        order.setField(quickfix.TransactTime())
+        order.setField(quickfix.TimeInForce(quickfix.TimeInForce_IMMEDIATE_OR_CANCEL))
+        self.sendToTarget(order, self.orderSession)
+
 
     def onExecutionReport(self, message, sessionID):
         print "!!!!! EXECUTIION REPORT ", message
