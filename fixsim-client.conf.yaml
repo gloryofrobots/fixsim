@@ -11,7 +11,7 @@ logging:
 #or logging:
 #   target: syslog
 
-#trade chance for each snapshot
+#trade chance for each snapshot in percents
 skip_snapshot_chance: 0
 
 instruments:
