@@ -2,16 +2,16 @@ Overview
 --------
 
 FixSim is an example project for FIX protocol client and server implementations.
-It can be used in production for testing your client or server and you might
-find a need to add new feature or change it's behavior. fixsim also can be used
-just as example for implementing acceptors and initiators
+It can be used for testing your client or server and you might
+find a need to add new feature or change fixsim's behavior. FixSim also can be used
+just as example for implementing acceptors and initiators.
 
 Configuration
 -------------
 
 FixSim consists of two scripts fixsim-client.py and fixsim-server.py. Each
-script use two configuration files, one for FIX Session settings, in ini format
-and one for business logic, in YAML. You can find example configurations with
+script use two configuration files, one for FIX Session settings in ini format
+and one for business logic in YAML. You can find example configurations with
 comments in project tree. For example fixsim-server may be started by command
 
 ```
@@ -19,13 +19,13 @@ python fixsim-server --acceptor_config fixsim-server.conf.ini --config
 fixsim-server.conf.yaml
 ```
 
-And fixsim-client may be started 
+And fixsim-client 
 
 ```
 python fixsim-client --initiator_config fixsim-client.conf.ini --config
 fixsim-client.conf.yaml
 ```
-FIXSIM depends on twisted but you can easily purge it from poject by replacing reactor infinite loop by other infinite loop and implementing something like twisted.internet.task.LoopingCall which used for sending snapshots and subscribing to instruments
+FIXSIM depends on twisted but you can easily purge it from poject by replacing reactor infinite loop by differrent infinite loop in main thread and implementing something like twisted.internet.task.LoopingCall which used for sending snapshots and subscribing to instruments
 
 FixSim supports only FIX44 now  
 
