@@ -14,12 +14,15 @@ script use two configuration files, one for FIX Session settings, in ini format
 and one for business logic, in YAML. You can find example configurations with
 comments in project tree. For example fixsim-server may be started by command
 
-`python fixsim-server --acceptor_config fixsim-server.conf.ini --config
+```
+python fixsim-server --acceptor_config fixsim-server.conf.ini --config
 fixsim-server.conf.yaml
+```
 
 And fixsim-client may be started 
 
+```
 `python fixsim-client --initiator_config fixsim-client.conf.ini --config
 fixsim-client.conf.yaml
-
+```
 
