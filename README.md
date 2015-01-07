@@ -1,5 +1,5 @@
 Overview
-========
+--------
 
 FixSim is an example project for FIX protocol client and server implementations.
 It can be used in production for testing your client or server and you might
