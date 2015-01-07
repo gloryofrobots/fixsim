@@ -1,15 +1,15 @@
-FIXSIM
-======
+Overview
+========
 
-FIXSIM is an example project of FIX client and server implementations.
+FixSim is an example project for FIX protocol client and server implementations.
 It can be used in production for testing your client or server and you might
-find a need to add new feature or change it`s behavior. And FIXSIM can be used
-just as extended example for implementing acceptors and initiators
+find a need to add new feature or change it's behavior. fixsim also can be used
+just as example for implementing acceptors and initiators
 
 Configuration
 -------------
 
-FIXSIM consists of two scripts fixsim-client.py and fixsim-server.py. Each
+FixSim consists of two scripts fixsim-client.py and fixsim-server.py. Each
 script use two configuration files, one for FIX Session settings, in ini format
 and one for business logic, in YAML. You can find example configurations with
 comments in project tree. For example fixsim-server may be started by command
@@ -27,11 +27,11 @@ fixsim-client.conf.yaml
 ```
 FIXSIM depends on twisted but you can easily purge it from poject by replacing reactor infinite loop by other infinite loop and implementing something like twisted.internet.task.LoopingCall which used for sending snapshots and subscribing to instruments
 
-FIXSIM supports only FIX44 now  
+FixSim supports only FIX44 now  
 
-Runtime
--------
+Workflow
+--------
 
-FIXSIM business logic is pretty simple. Server receives client session and stores it. Client subscribes for one or more instruments (like EUR/USD, USD/CAD etc) and server begin sending market data snapshots to client. For each snapshot client can create new order(see skip_snapshot_chance attr in client yaml config) and send it to acceptor. For each such order acceptor with some chance(see reject rate in server yaml config) can create filled exection report.
+FixSim business logic is pretty simple. Server receives client session and stores it. Client subscribes to the one or more instrument (like EUR/USD, USD/CAD etc) and server starts sending market data snapshots to client. Client can create a new order  for each snapshot and send it to acceptor or skip this snapshot (see skip_snapshot_chance attr in client yaml config). Order is created for one randomly selected quote from previously received snapshot. For each such order acceptor can create filled or rejected execution report(see reject rate in server yaml config) 
 
 
