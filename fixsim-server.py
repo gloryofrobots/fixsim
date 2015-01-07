@@ -1,35 +1,34 @@
 import sys
-import yaml
+import argparse
 from twisted.internet import reactor
-
-import quickfix
 
 from fixsim.server import create_acceptor
 
 
-def load_simulator_config(path):
-    with open(path, 'r') as stream:
-        cfg = yaml.load(stream)
+def parse_options(arguments):
+    parser = argparse.ArgumentParser(description='Run FIX server simulator')
 
-    return cfg
+    parser.add_argument('-ac', '--acceptor_config', type=str, required=True
+                        , help='Path to FIX config file')
+    parser.add_argument('-c', '--server_config', type=str, required=True
+                        , help='Path to FIX server config file')
+
+    result = parser.parse_args(arguments)
+    return result
 
 
-def print_usage():
-    print "usage: python fixsim-server.py path_to_fix_config path_to_server_config"
+def main(params):
+    options = parse_options(params)
 
+    acceptor = create_acceptor(options.acceptor_config, options.server_config)
+    acceptor.start()
 
-def main(args):
-    print args
-    if len(args) != 2:
-        return print_usage()
-    try:
-        acceptor = create_acceptor(args[0], args[1])
-        acceptor.start()
-
-        reactor.run()
-    except (quickfix.ConfigError, quickfix.RuntimeError) as e:
-        print(e)
+    reactor.run()
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    args = []
+    if len(sys.argv) > 1:
+        args = sys.argv[1:]
+
+    main(args)

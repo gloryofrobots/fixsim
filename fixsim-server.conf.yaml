@@ -1,13 +1,18 @@
 ---
+#Snapshot publish interval
 publish_interval: 10
 
+#only 44 version supported
 fix_version: FIX44
+
 logging:
     target: file
     filename: fixsim.log
+#or logging:
+#   target: syslog
 
-#percent for rejected trades
-reject_rate: 50
+#Trade reject chance in percents
+reject_rate: 0
 
 instruments:
     - symbol: USD/RUB
@@ -25,6 +30,28 @@ instruments:
 
         - size: 10000
           price: 51.656
+
+      #variation for bids and asks price
+      variation:
+        step: 0.1
+        #max variation
+        limit: 20
+
+    - symbol: EUR/USD
+      bid:
+        - size: 5000
+          price: 1.1
+
+
+        - size: 2000
+          price: 1.115
+
+      ask:
+        - size: 5000
+          price: 1.3
+
+        - size: 2000
+          price: 1.212
 
       variation:
         step: 0.1

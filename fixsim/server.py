@@ -161,7 +161,7 @@ class IDGenerator(object):
     def reqID(self):
         return self._reqID.generate()
 
-def create_acceptor(server_config, simulation_config):
+def create_acceptor(acceptor_config, simulation_config):
     def create_subscriptions(sources):
         subscriptions = Subscriptions()
 
@@ -183,7 +183,7 @@ def create_acceptor(server_config, simulation_config):
             subscriptions.add(subscription)
         return subscriptions
 
-    settings = quickfix.SessionSettings(server_config)
+    settings = quickfix.SessionSettings(acceptor_config)
 
     config = load_yaml(simulation_config)
 

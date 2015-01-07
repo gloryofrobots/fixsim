@@ -67,7 +67,7 @@ class IDGenerator(object):
         return self._reqID.generate()
 
 
-def create_initiator(client_config, simulation_config):
+def create_initiator(initiator_config, simulation_config):
     def create_subscriptions(instruments):
         result = Subscriptions()
 
@@ -77,7 +77,7 @@ def create_initiator(client_config, simulation_config):
 
         return result
 
-    settings = quickfix.SessionSettings(client_config)
+    settings = quickfix.SessionSettings(initiator_config)
     config = load_yaml(simulation_config)
 
     fix_version = create_fix_version(config)
@@ -144,10 +144,6 @@ class Client(FixSimApplication):
 
     def __init__(self, fixVersion, logger, skipSnapshotChance, subscribeInterval, subscriptions):
         super(Client, self).__init__(fixVersion, logger)
-        # TODO DELETE AFTER COMPLETE
-        import quickfix44
-
-        self.fixVersion = quickfix44
 
         self.skipSnapshotChance = skipSnapshotChance
         self.subscribeInterval = subscribeInterval
@@ -166,10 +162,10 @@ class Client(FixSimApplication):
         # print "ON LOGON sid", sid
         if sid.find(self.MKD_TOKEN) != -1:
             self.marketSession = sessionID
-            self.logger.info("MARKET SESSION %s", self.marketSession)
+            self.logger.info("FIXSIM-CLIENT MARKET SESSION %s", self.marketSession)
         else:
             self.orderSession = sessionID
-            self.logger.info("ORDER SESSION %s", self.orderSession)
+            self.logger.info("FIXSIM-CLIENT ORDER SESSION %s", self.orderSession)
 
     def onLogout(self, sessionID):
         # print "ON LOGOUT"
@@ -189,7 +185,7 @@ class Client(FixSimApplication):
 
     def subscribe(self):
         if self.marketSession is None:
-            self.logger.info("Market session is none, skip subscribing")
+            self.logger.info("FIXSIM-CLIENT Market session is none, skip subscribing")
             return
 
         for subscription in self.subscriptions:
@@ -214,101 +210,10 @@ class Client(FixSimApplication):
 
             self.sendToTarget(message, self.marketSession)
 
-    def getSettlementDate(self):
-        tomorrow = datetime.date.today() + datetime.timedelta(days=1)
-        return tomorrow.strftime('%Y%m%d')
-
-    def onNewOrderSingle(self, message, beginString, sessionID):
-        symbol = quickfix.Symbol()
-        side = quickfix.Side()
-        ordType = quickfix.OrdType()
-        orderQty = quickfix.OrderQty()
-        price = quickfix.Price()
-        clOrdID = quickfix.ClOrdID()
-        quoteID = quickfix.QuoteID()
-        currency = quickfix.Currency()
-
-        message.getField(ordType)
-        if ordType.getValue() != quickfix.OrdType_PREVIOUSLY_QUOTED:
-            raise quickfix.IncorrectTagValue(ordType.getField())
-
-        message.getField(symbol)
-        message.getField(side)
-        message.getField(orderQty)
-        message.getField(price)
-        message.getField(clOrdID)
-        message.getField(quoteID)
-        message.getField(currency)
-
-        executionReport = quickfix.Message()
-        executionReport.getHeader().setField(beginString)
-        executionReport.getHeader().setField(quickfix.MsgType(quickfix.MsgType_ExecutionReport))
-        executionReport.setField(quickfix.OrderID(self.idGen.orderID()))
-        executionReport.setField(quickfix.ExecID(self.idGen.execID()))
-
-        try:
-            reject_chance = random.choice(range(1, 101))
-            if self.rejectRate > reject_chance:
-                raise FixSimError("Rejected by cruel destiny %s" % str((reject_chance, self.rejectRate)))
-
-            subscription = self.subscriptions.get(symbol.getValue())
-            quote = subscription.orderbook.get(quoteID.getValue())
-
-            execPrice = price.getValue()
-            execSize = orderQty.getValue()
-            if execSize > quote.size:
-                raise FixSimError("size to large for quote")
-
-            if abs(execPrice - quote.price) > 0.0000001:
-                raise FixSimError("Trade price not equal to quote")
-
-            executionReport.setField(quickfix.SettlDate(self.getSettlementDate()))
-            executionReport.setField(quickfix.Currency(subscription.currency))
-
-            executionReport.setField(quickfix.OrdStatus(quickfix.OrdStatus_FILLED))
-            executionReport.setField(symbol)
-            executionReport.setField(side)
-            executionReport.setField(clOrdID)
-
-            executionReport.setField(quickfix.Price(price.getValue()))
-            executionReport.setField(quickfix.AvgPx(execPrice))
-            executionReport.setField(quickfix.LastPx(execPrice))
-
-            executionReport.setField(quickfix.LastShares(execSize))
-            executionReport.setField(quickfix.CumQty(execSize))
-            executionReport.setField(quickfix.OrderQty(execSize))
-
-            executionReport.setField(quickfix.ExecType(quickfix.ExecType_FILL))
-            executionReport.setField(quickfix.LeavesQty(0))
-
-        except Exception as e:
-            self.logger.exception("FixServer:Close order error")
-            executionReport.setField(quickfix.SettlDate(''))
-            executionReport.setField(currency)
-
-            executionReport.setField(quickfix.OrdStatus(quickfix.OrdStatus_REJECTED))
-            executionReport.setField(symbol)
-            executionReport.setField(side)
-            executionReport.setField(clOrdID)
-
-            executionReport.setField(quickfix.Price(0))
-            executionReport.setField(quickfix.AvgPx(0))
-            executionReport.setField(quickfix.LastPx(0))
-
-            executionReport.setField(quickfix.LastShares(0))
-            executionReport.setField(quickfix.CumQty(0))
-            executionReport.setField(quickfix.OrderQty(0))
-
-            executionReport.setField(quickfix.ExecType(quickfix.ExecType_REJECTED))
-            executionReport.setField(quickfix.LeavesQty(0))
-
-        self.sendToTarget(executionReport, sessionID)
-
-
     def onMarketDataSnapshotFullRefresh(self, message, sessionID):
         skip_chance = random.choice(range(1, 101))
         if self.skipSnapshotChance > skip_chance:
-            self.logger.info("onMarketDataSnapshotFullRefresh skip making trade with random choice %d", skip_chance)
+            self.logger.info("FIXSIM-CLIENT onMarketDataSnapshotFullRefresh skip making trade with random choice %d", skip_chance)
             return
 
         fix_symbol = quickfix.Symbol()
@@ -334,7 +239,6 @@ class Client(FixSimApplication):
             group.getField(price)
             group.getField(size)
 
-            print price, size, quote_id, currency
             quote = Quote()
             quote.price = price.getValue()
             quote.size = size.getValue()
@@ -355,10 +259,10 @@ class Client(FixSimApplication):
         self.makeOrder(snapshot)
 
     def makeOrder(self, snapshot):
-        print "SNAPSHOT RECEIVED !!!!!!"
-        print snapshot
+        self.logger.info("FIXSIM-CLIENT Snapshot received %s", str(snapshot))
         quote = snapshot.getRandomQuote()
-        print "CHOSEN QUOTE", quote
+
+        self.logger.info("FIXSIM-CLIENT make order for quote %s", str(quote))
         order = self.fixVersion.NewOrderSingle()
         order.setField(quickfix.HandlInst(quickfix.HandlInst_AUTOMATED_EXECUTION_ORDER_PUBLIC_BROKER_INTERVENTION_OK))
         order.setField(quickfix.SecurityType(quickfix.SecurityType_FOREIGN_EXCHANGE_CONTRACT))
@@ -381,9 +285,7 @@ class Client(FixSimApplication):
 
 
     def onExecutionReport(self, message, sessionID):
-        print "!!!!! EXECUTIION REPORT ", message
-        pass
-
+        self.logger.info("FIXSIM-CLIENT EXECUTION REPORT  %s", str(message))
 
     def dispatchFromApp(self, msgType, message, beginString, sessionID):
         if msgType == '8':
